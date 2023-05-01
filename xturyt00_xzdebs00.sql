@@ -330,6 +330,17 @@ END;
 
 /
 
+---- 3. Pokud uživatel nezadal adresu, nelze vytvořit objednávku a dojde k chybě
+CREATE OR REPLACE TRIGGER ORDER_ADRESS_CHECK BEFORE
+    INSERT ON ORDERS FOR EACH ROW
+BEGIN
+    IF (:NEW.ADDRESS_ID is null) THEN
+        RAISE_APPLICATION_ERROR(-20000, 'Address not set');
+    END IF;
+END;
+
+/
+
 -- PROCEDURES --
 
 ---- 1. Procedura vypočítá průměrné hodnocení produktu na základě jeho recenzí.
@@ -360,11 +371,11 @@ BEGIN
 
     AVG_RATING := SUM_RATING / PRODUCTS_COUNT;
 
-    DBMS_OUTPUT.PUT_LINE('AVG rating: ' || AVG_RATING);
+    DBMS_OUTPUT.PUT_LINE('AVG rating: ' || AVG_RATING || 'of product ' || P_ID);
 
     EXCEPTION
         WHEN FEEDBACKS_DONT_EXIST THEN
-            DBMS_OUTPUT.PUT_LINE('No feedback was found');
+            DBMS_OUTPUT.PUT_LINE('No feedback was found for product' || P_ID);
 END;
 
 /
@@ -887,6 +898,17 @@ INSERT INTO ITEMS (
     8 * (SELECT UNIT_PRICE FROM PRODUCTS WHERE PRODUCT_ID = 4)
 );
 
+---- Druhý uživatel se snaží udělat objednávku
+INSERT INTO ORDERS (
+    CUSTOMER_LOGIN,
+    STATUS,
+    TOTAL_PRICE
+) VALUES (
+    'xcash00',
+    'pending',
+    (SELECT SUM(QUANTITY_PRICE) FROM ITEMS WHERE CART_ID = 1)
+);
+
 ---- Druhý uživatel píše review pro zboží
 INSERT INTO FEEDBACKS (
     CUSTOMER_LOGIN,
@@ -907,6 +929,7 @@ SET
     )
 WHERE
     PRODUCT_ID = 1;
+
 
 --- Práce s třetím uživatelem
 
@@ -1020,55 +1043,33 @@ INSERT INTO ORDERS (
     (SELECT SUM(QUANTITY_PRICE) FROM ITEMS WHERE CART_ID = 3)
 );
 
----- Po vytvoření objednávky vytvoří se platba kterou první uživatel musí uhradit
-INSERT INTO PAYMENTS (
-    ASSIGNED_TO,
-    ACCOUNT_NUMBER,
-    IS_PAID,
-    ORDER_ID,
-    TOTAL_PRICE
-) VALUES (
-    'xmorri00',
-    '5678 9101 1121 3141',
-    0,
-    2,
-    (SELECT TOTAL_PRICE FROM ORDERS WHERE ORDER_ID = 1)
-);
-
 ---- Uživatel zaplatil objednávku
 UPDATE PAYMENTS
 SET
     IS_PAID = 1
 WHERE
-    PAYMENT_ID = 2;
+    PAYMENT_ID = 3;
 
+UPDATE ORDERS
+SET
+    PAYMENT_ID = 3
+WHERE
+    ORDER_ID = 4;
+
+
+EXECUTE SHIP_ORDER(4, 'xjohns00');
 ---- Po zaplacení stav objednávky byl změněn
 UPDATE ORDERS
 SET
     STATUS = 'processing'
 WHERE
-    ORDER_ID = 2;
+    ORDER_ID = 4;
 
----- Po zaplacení druhý zaměstnanec zpracoval objednávku
-UPDATE ORDERS
-SET
-    PROCESSED_BY = 'xjohns00'
-WHERE
-    ORDER_ID = 2;
-
----- Po zpracování druhý zaměstnanec odeslal objednávku
-UPDATE ORDERS
-SET
-    SHIPPED_BY = 'xjohns00'
-WHERE
-    ORDER_ID = 1;
-
----- Po odeslání stav objednávky byl změněn
-UPDATE ORDERS
-SET
-    STATUS = 'shipped'
-WHERE
-    ORDER_ID = 1;
+SELECT * FROM ORDERS;
+SELECT * FROM PAYMENTS;
+ SELECT IS_PAID
+    FROM PAYMENTS
+    WHERE PAYMENTS.PAYMENT_ID = 3;
 
 ---- Tretí uživatel píše review pro zboží
 INSERT INTO FEEDBACKS (
@@ -1092,126 +1093,6 @@ WHERE
     PRODUCT_ID = 5;
 
 /
-
--- SEKCE SELECT
-
--- --- Spojení dvou tabulek
-
--- ---- 1 Tabulka, která ukazuje, kdo vyřizoval objednávky
--- SELECT ORDER_ID,
---     EMPLOYEE_LOGIN
--- FROM ORDERS
---     JOIN EMPLOYEES ON ORDERS.PROCESSED_BY=EMPLOYEES.EMPLOYEE_LOGIN;
-
--- ---- Tabulka objednávek
--- SELECT *
--- FROM ORDERS;
-
--- ---- Tabulka zaměstnanců
--- SELECT *
--- FROM EMPLOYEES;
-
--- ---- 2 Tabulka, která ukazuje hodnocení a recenze produktů
--- SELECT PRODUCTS.PRODUCT_ID,
---     PRODUCT_NAME,
---     TOTAL_RATING,
---     FEEDBACK_ID,
---     RATING,
---     CONTENT
--- FROM PRODUCTS
---     JOIN FEEDBACKS ON PRODUCTS.PRODUCT_ID=FEEDBACKS.PRODUCT_ID;
-
--- ---- Tabulka produktů
--- SELECT *
--- FROM PRODUCTS;
-
--- ---- Tabulka recenzí
--- SELECT *
--- FROM FEEDBACKS;
-
--- --- Spojení tří tabulek
-
--- ---- 3 Obsah objednávek: jméno a množství produktu
--- SELECT ORDERS.ORDER_ID,
---     ITEMS.PRODUCT_ID,
---     PRODUCTS.PRODUCT_NAME,
---     ITEMS.QUANTITY
--- FROM ORDERS
---     JOIN ITEMS ON ORDERS.ORDER_ID=ITEMS.ORDER_ID JOIN PRODUCTS ON ITEMS.PRODUCT_ID = PRODUCTS.PRODUCT_ID
--- ORDER BY ORDERS.ORDER_ID ASC;
-
--- ---- Tabulka objednávek
--- SELECT *
--- FROM ORDERS;
-
--- ---- Tabulka položek
--- SELECT *
--- FROM ITEMS;
-
--- ---- Tabulka produktů
--- SELECT *
--- FROM PRODUCTS;
-
--- --- Dotazy s klauzulí GROUP BY
-
--- ---- 4 Kolik produktů každé kategorie je v obchodě
--- SELECT COUNT(PRODUCTS.PRODUCT_ID),
---     PRODUCTS.CATEGORY
--- FROM PRODUCTS
--- GROUP BY PRODUCTS.CATEGORY;
-
--- ---- Tabulka produktů
--- SELECT *
--- FROM PRODUCTS;
-
--- ---- 5 Tabulka ukazuje průměrný počet produktů vybraných zákazníky
--- SELECT AVG(ITEMS.QUANTITY),
---     ITEMS.PRODUCT_ID
--- FROM ITEMS
--- GROUP BY ITEMS.PRODUCT_ID;
-
--- ---- Tabulka položek
--- SELECT *
--- FROM ITEMS;
-
--- --- Dotaz obsahující predikát EXIST
-
--- ---- 6 Tabulka ukazuje zákazníky, kteří provedli objednávku za méně než 200 korun
--- SELECT CUSTOMERS.CUSTOMER_LOGIN,
---     ORDERS.ORDER_ID,
---     ORDERS.TOTAL_PRICE
--- FROM CUSTOMERS
---     JOIN ORDERS ON ORDERS.CUSTOMER_LOGIN = CUSTOMERS.CUSTOMER_LOGIN
--- WHERE EXISTS (
---         SELECT ORDERS.ORDER_ID
---         FROM ORDERS
---         WHERE ORDERS.CUSTOMER_LOGIN = CUSTOMERS.CUSTOMER_LOGIN AND TOTAL_PRICE < 200
---     );
-
--- ---- Tabulka objednávek
--- SELECT *
--- FROM ORDERS;
-
--- ---- Tabulka uživatelů
--- SELECT *
--- FROM CUSTOMERS;
-
--- --- Dotaz s predikátem IN
--- ---- 7 Tabulka ukazuje produkty, které uživatelé přidávali do košíku
--- SELECT *
--- FROM PRODUCTS
--- WHERE PRODUCTS.PRODUCT_ID IN (
---         SELECT ITEMS.PRODUCT_ID
---         FROM ITEMS
---     );
-
--- ---- Tabulka produktů
--- SELECT *
--- FROM PRODUCTS;
-
--- ---- Tabulka uživatelů
--- SELECT *
--- FROM CUSTOMERS;
 
 -- WITH & CASE SELECT --
 
@@ -1244,22 +1125,32 @@ SELECT *
 FROM PRODUCT_CATEGORY_COUNT;
 
 -- PRIVILEGES --
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.ADDRESSES TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.ADMINS TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.CARTS TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.CUSTOMERS TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.EMPLOYEES TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.FEEDBACKS TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.GUESTS TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.ORDERS TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.PAYMENTS TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.PRODUCTS TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.ITEMS TO XZDEBS00;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON XTURYT00.PRODUCT_CATEGORY_COUNT TO XZDEBS00;
--- GRANT EXECUTE ON AVERAGE_PRODUCT_RATING TO XZDEBS00;
+GRANT ALL ON XTURYT00.ADDRESSES TO XZDEBS00;
+GRANT ALL ON XTURYT00.ADMINS TO XZDEBS00;
+GRANT ALL ON XTURYT00.CARTS TO XZDEBS00;
+GRANT ALL ON XTURYT00.CUSTOMERS TO XZDEBS00;
+GRANT ALL ON XTURYT00.EMPLOYEES TO XZDEBS00;
+GRANT ALL ON XTURYT00.FEEDBACKS TO XZDEBS00;
+GRANT ALL ON XTURYT00.GUESTS TO XZDEBS00;
+GRANT ALL ON XTURYT00.ORDERS TO XZDEBS00;
+GRANT ALL ON XTURYT00.PAYMENTS TO XZDEBS00;
+GRANT ALL ON XTURYT00.PRODUCTS TO XZDEBS00;
+GRANT ALL ON XTURYT00.ITEMS TO XZDEBS00;
+GRANT ALL ON XTURYT00.PRODUCT_CATEGORY_COUNT TO XZDEBS00;
+GRANT EXECUTE ON AVERAGE_PRODUCT_RATING TO XZDEBS00;
+GRANT EXECUTE ON SHIP_ORDER TO XZDEBS00;
 
 -- EXPLAIN PLAN & INDEXES --
--- how much customer needs to pay for all
+
+-- Poskytnutý kód je příkladem použití EXPLAIN PLAN a vytvoření 
+-- indexu k optimalizaci zpracování dotazu.
+
+-- V tomto příkladu dotaz vypočítává celkovou částku, kterou každý zákazník
+-- musí zaplatit v daném období. Dotaz spojuje tabulky PAYMENTS a CUSTOMERS
+-- pomocí sloupců PAYMENTS.ASSIGNED_TO a CUSTOMERS.CUSTOMER_LOGIN a vybírá
+-- pouze platby, které mají datum splatnosti mezi 1. lednem 2022 a 1. lednem 2024.
+-- Výsledek je poté seskupen podle křestního jména zákazníka a řazen abecedně.
+
 SELECT FIRST_NAME,
     SUM(TOTAL_PRICE)
 FROM PAYMENTS
@@ -1267,6 +1158,7 @@ FROM PAYMENTS
 GROUP BY FIRST_NAME
 ORDER BY FIRST_NAME;
 
+-- Nejprve spustíme EXPLAIN PLAN, abychom viděli plán provedení původního dotazu. 
 EXPLAIN PLAN FOR 
 SELECT FIRST_NAME,
     SUM(TOTAL_PRICE)
@@ -1278,6 +1170,10 @@ ORDER BY FIRST_NAME;
 SELECT *
 FROM TABLE(DBMS_XPLAN.DISPLAY);
 
+-- K optimalizaci tohoto dotazu vytvoříme index na sloupci PAYMENTS.EXPIRES_AT,
+-- který se používá v WHERE klauzuli k filtrování plateb podle data splatnosti.
+-- Index umožní databázi rychle najít relevantní řádky v tabulce PAYMENTS a zlepší
+-- výkon dotazu.
 CREATE INDEX PAYMENT_INDEX ON PAYMENTS(
     EXPIRES_AT
 );
@@ -1299,3 +1195,4 @@ SELECT *
 FROM FEEDBACKS;
 
 EXECUTE AVERAGE_PRODUCT_RATING(6);
+EXECUTE AVERAGE_PRODUCT_RATING(1);
