@@ -297,7 +297,7 @@ SET
     ORDER_ID = :NEW.ORDER_ID,
     CART_ID = NULL
 WHERE
-    ITEMS.CART_ID = (SELECT CART_ID FROM CUSTOMERS WHERE CUSTOMERS.CUSTOMER_LOGIN = :NEW.CUSTOMER_LOGIN) AND ORDER_ID IS NULL;
+    ITEMS.CART_ID = (SELECT CART_ID FROM CUSTOMERS WHERE CUSTOMERS.CUSTOMER_LOGIN = :NEW.CUSTOMER_LOGIN);
 
     ---- Po vytvoření objednávky vytvoří se platba kterou první uživatel musí uhradit
 INSERT INTO PAYMENTS (
@@ -776,6 +776,50 @@ SET
     )
 WHERE
     PRODUCT_ID = 1;
+
+--- První uživatel vkladá nové zboží do košíku
+INSERT INTO ITEMS (
+    PRODUCT_ID,
+    CART_ID,
+    QUANTITY,
+    QUANTITY_PRICE
+) VALUES (
+    6,
+    1,
+    3,
+    3 * (SELECT UNIT_PRICE FROM PRODUCTS WHERE PRODUCT_ID = 1)
+);
+
+INSERT INTO ITEMS (
+    PRODUCT_ID,
+    CART_ID,
+    QUANTITY,
+    QUANTITY_PRICE
+) VALUES (
+    5,
+    1,
+    4,
+    4 * (SELECT UNIT_PRICE FROM PRODUCTS WHERE PRODUCT_ID = 2)
+);
+
+SELECT *
+FROM ITEMS;
+
+---- První uživatel vytvořil novu objednávku
+INSERT INTO ORDERS (
+    CUSTOMER_LOGIN,
+    ADDRESS_ID,
+    STATUS,
+    TOTAL_PRICE
+) VALUES (
+    'xbrown00',
+    1,
+    'pending',
+    (SELECT SUM(QUANTITY_PRICE) FROM ITEMS WHERE CART_ID = 1)
+);
+
+SELECT *
+FROM ITEMS;
 
 --- Práce s druhým uživatelem
 
